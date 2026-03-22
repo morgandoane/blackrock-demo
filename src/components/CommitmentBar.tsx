@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import {
   motion,
   AnimatePresence,
@@ -26,6 +26,12 @@ export interface CommitmentBarProps {
   label?: string;
   /** Override the default label shown when focus is lost / retracting. */
   retractLabel?: string;
+  /** Progress value (0–1) at which the checkpoint triggers (label swap, visual pulse). */
+  checkpoint?: number;
+  /** Label shown after progress crosses the checkpoint. */
+  checkpointLabel?: string;
+  /** Visual position (0–1) along the track where the dot renders. Defaults to checkpoint. */
+  checkpointDotPosition?: number;
 }
 
 interface VariantConfig {
@@ -105,10 +111,28 @@ export default function CommitmentBar({
   isRetracting,
   label: labelOverride,
   retractLabel: retractLabelOverride,
+  checkpoint,
+  checkpointLabel,
+  checkpointDotPosition,
 }: CommitmentBarProps) {
   const cfg = VARIANT_CONFIGS[variant];
-  const activeLabel = labelOverride ?? cfg.label;
+  const baseLabel = labelOverride ?? cfg.label;
   const activeRetractLabel = retractLabelOverride ?? cfg.retractLabel;
+
+  const [pastCheckpoint, setPastCheckpoint] = useState(false);
+
+  useEffect(() => {
+    if (checkpoint == null) return;
+    return progress.on("change", (v) => {
+      setPastCheckpoint(v >= checkpoint);
+    });
+  }, [progress, checkpoint]);
+
+  useEffect(() => {
+    if (!visible) setPastCheckpoint(false);
+  }, [visible]);
+
+  const activeLabel = pastCheckpoint && checkpointLabel ? checkpointLabel : baseLabel;
 
   const trackRef = useRef<HTMLDivElement>(null);
   const trackWMv = useMotionValue(150);
@@ -232,6 +256,59 @@ export default function CommitmentBar({
 
   const trackRadius = cfg.trackHeight / 2;
 
+  const DOT_SIZE = 16;
+  const hasCheckpoint = checkpoint != null && checkpoint > 0 && checkpoint < 1;
+  const dotPos = checkpointDotPosition ?? checkpoint ?? 0.5;
+
+  const checkpointDotLeft = useTransform(trackWMv, (w) =>
+    hasCheckpoint ? dotPos * w - DOT_SIZE / 2 : 0,
+  );
+
+  const checkpointDotTop = useTransform(trackHMv, (h) => h / 2 - DOT_SIZE / 2);
+
+  const checkpointDotOpacity = useTransform(progress, (p) => {
+    if (!hasCheckpoint) return 0;
+    const dist = checkpoint - p;
+    if (dist > 0.3) return 0.4;
+    if (dist > 0) return 0.4 + (1 - dist / 0.3) * 0.6;
+    return 1;
+  });
+
+  const checkpointDotScale = useTransform(progress, (p) => {
+    if (!hasCheckpoint) return 1;
+    const dist = Math.abs(p - checkpoint);
+    if (dist < 0.015) return 1.35;
+    if (dist < 0.06) return 1 + 0.35 * (1 - (dist - 0.015) / 0.045);
+    return 1;
+  });
+
+  const checkpointDotBg = useTransform(progress, (p) => {
+    if (!hasCheckpoint) return "transparent";
+    if (p >= checkpoint - 0.02) return "#fff";
+    return "transparent";
+  });
+
+  const checkpointDotBorder = useTransform(progress, (p) => {
+    if (!hasCheckpoint) return "2.5px solid rgba(255,255,255,0.2)";
+    if (p >= checkpoint - 0.02) return "2.5px solid #fff";
+    const dist = checkpoint - p;
+    const brightness = dist < 0.2 ? 0.2 + (1 - dist / 0.2) * 0.5 : 0.2;
+    return `2.5px solid rgba(255,255,255,${brightness})`;
+  });
+
+  const checkpointDotShadow = useTransform(progress, (p) => {
+    if (!hasCheckpoint) return "none";
+    const dist = Math.abs(p - checkpoint);
+    if (p >= checkpoint - 0.02) {
+      return `0 0 10px rgba(255,255,255,0.5), 0 0 4px rgba(0,0,0,0.8)`;
+    }
+    if (dist < 0.1) {
+      const intensity = 1 - dist / 0.1;
+      return `0 0 ${4 + 8 * intensity}px rgba(255,255,255,${0.2 * intensity}), 0 0 3px rgba(0,0,0,0.6)`;
+    }
+    return "0 0 3px rgba(0,0,0,0.5)";
+  });
+
   return (
     <AnimatePresence>
       {visible && (
@@ -244,11 +321,11 @@ export default function CommitmentBar({
           style={{ position: "absolute", bottom: 28, left: 20, right: 20 }}
         >
           <motion.div
-            animate={{ opacity: isSent ? 0 : isRetracting ? 0.25 : 0.38 }}
+            animate={{ opacity: isSent ? 0 : isRetracting ? 0.45 : 0.65 }}
             transition={{ duration: 0.3 }}
             style={{
               fontSize: 9,
-              color: isRetracting ? "#F09A37" : "#888",
+              color: isRetracting ? "#F09A37" : "#aaa",
               letterSpacing: 1.2,
               textTransform: "uppercase",
               marginBottom: 6,
@@ -260,54 +337,76 @@ export default function CommitmentBar({
             {isRetracting ? activeRetractLabel : activeLabel}
           </motion.div>
 
-          <div
-            ref={trackRef}
-            style={{
-              height: cfg.trackHeight,
-              borderRadius: trackRadius,
-              background: "#111",
-              border: "1px solid rgba(255,255,255,0.07)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <motion.div
+          <div style={{ position: "relative" }}>
+            <div
+              ref={trackRef}
               style={{
-                position: "absolute",
-                left: fillLeft,
-                top: fillTop,
-                width: fillWidth,
-                height: fillHeight,
-                borderRadius: fillRadius,
-                background: fillBackground,
-                boxShadow: fillBoxShadow,
-                zIndex: 2,
+                height: cfg.trackHeight,
+                borderRadius: trackRadius,
+                background: "#111",
+                border: "1px solid rgba(255,255,255,0.07)",
+                position: "relative",
+                overflow: "hidden",
               }}
-            />
-
-            {cfg.showPlusBadge && (
-              <div
+            >
+              <motion.div
                 style={{
                   position: "absolute",
-                  right: 8,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  width: 14,
-                  height: 14,
-                  borderRadius: 4,
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "rgba(255,255,255,0.25)",
-                  zIndex: 3,
+                  left: fillLeft,
+                  top: fillTop,
+                  width: fillWidth,
+                  height: fillHeight,
+                  borderRadius: fillRadius,
+                  background: fillBackground,
+                  boxShadow: fillBoxShadow,
+                  zIndex: 2,
+                }}
+              />
+
+              {cfg.showPlusBadge && (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 8,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 14,
+                    height: 14,
+                    borderRadius: 4,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "rgba(255,255,255,0.25)",
+                    zIndex: 3,
+                    pointerEvents: "none",
+                  }}
+                >
+                  +
+                </div>
+              )}
+            </div>
+
+            {hasCheckpoint && (
+              <motion.div
+                style={{
+                  position: "absolute",
+                  left: checkpointDotLeft,
+                  top: checkpointDotTop,
+                  width: DOT_SIZE,
+                  height: DOT_SIZE,
+                  borderRadius: "50%",
+                  border: checkpointDotBorder,
+                  background: checkpointDotBg,
+                  opacity: checkpointDotOpacity,
+                  scale: checkpointDotScale,
+                  boxShadow: checkpointDotShadow,
+                  zIndex: 10,
                   pointerEvents: "none",
                 }}
-              >
-                +
-              </div>
+              />
             )}
           </div>
         </motion.div>

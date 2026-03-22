@@ -3,6 +3,7 @@ import InteractionDetailPage from "./pages/InteractionDetailPage";
 import InteractionsLayout from "./pages/InteractionsLayout";
 import InteractionsPage from "./pages/InteractionsPage";
 import MessagingPage from "./pages/MessagingPage";
+import PrescriptionPage from "./pages/PrescriptionPage";
 
 export default function App() {
   return (
@@ -16,6 +17,14 @@ export default function App() {
               element={
                 <div className="h-full min-h-0 overflow-hidden">
                   <MessagingPage />
+                </div>
+              }
+            />
+            <Route
+              path="/prescription"
+              element={
+                <div className="h-full min-h-0 overflow-hidden">
+                  <PrescriptionPage />
                 </div>
               }
             />

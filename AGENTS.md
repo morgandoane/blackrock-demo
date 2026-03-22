@@ -116,3 +116,29 @@ This is a framework, not a finished system. The open questions are significant a
 - **Stakes classification:** How does the AI determine the stakes of a given action? How much of that classification is contextual, how much is learned from the individual user, and how much needs to be explicitly defined?
 
 These are prototyping questions — best answered by building, testing, and iterating, not by theorizing. The framework provides the structure. The details live in the prototype.
+
+---
+
+## Git Workflow (for AI agents)
+
+This repo runs on **Windows with PowerShell**. PowerShell is not bash. Follow these rules when committing and pushing:
+
+### Shell constraints
+
+- **No `&&` chaining.** PowerShell does not support `&&` as a command separator. Run `git add` and `git commit` as **separate sequential Shell calls**.
+- **No heredoc (`<<'EOF'`).** PowerShell does not support bash-style heredocs. Pass the commit message directly with `-m` flags.
+- **Multi-paragraph messages:** Use one `-m` flag for the subject line and a second `-m` flag for the body. Do not try to embed newlines with `\n` or heredoc syntax.
+
+### Commit sequence
+
+1. `git add -A` (or stage specific files)
+2. `git commit -m "Subject line" -m "Body paragraph with more detail."`
+3. `git status` to verify
+4. `git push` only when the user explicitly asks
+
+### Commit message style
+
+- **Subject line:** Imperative mood, ~50 chars. Describe what the commit does, not what you did. Example: `Add prescription refill interaction with two-stage commitment bar`
+- **Body:** One paragraph summarizing the meaningful changes. Focus on what changed and why, not file-by-file narration. Keep it under ~300 chars.
+- Do not list every file touched. The diff does that.
+- Do not prefix with `feat:`, `fix:`, etc. — this repo does not use conventional commits.

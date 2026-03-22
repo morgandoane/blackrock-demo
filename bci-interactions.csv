@@ -1,0 +1,21 @@
+action,tool,domain,consequence,reversibility,routineness,commitment_friction,context_richness,composition_complexity,commitment_mechanism,context_inputs,composition_output,notes
+Adjust lighting,smart_home_api,environment,1,10,8,1,3,1,auto,"location, time, ambient signal",device_command,Acts on intent drift — no explicit confirmation needed
+Play music,media_api,environment,1,10,7,1,4,2,auto,"activity state, listening history, presence",playlist_selection,Corrective signal is the interesting design question
+Set a reminder,calendar_api,productivity,3,8,6,3,5,3,focus_bar,"calendar, location, routines",reminder_with_time,Brief attentional focus — bar widget appropriate
+Send a text message,messaging_api,communication,5,6,7,5,6,5,focus_bar,"contact history, location, recent thread",message_draft,
+Send an email,email_api,communication,6,5,5,6,7,7,focus_bar_extended,"relationship register, reply vs cold, history",long_form_draft,More AI co-authoring; commit bar may fill slower to reflect stakes
+Reorder a recurring item,ecommerce_api,commerce,4,7,8,4,6,3,focus_bar,"purchase history, consumption patterns, inventory",order_summary,Routineness earns trust — 5th reorder has lower threshold than 1st
+Unlock the front door,access_control_api,security,6,8,5,7,8,4,focus_bar_proximity,"location, proximity, time, who is home",access_command,World model participates — proximity collapses or raises threshold
+Refill a prescription,pharmacy_api,health,7,5,6,7,8,5,focus_bar_extended_plus,"medication schedule, pharmacy prefs, insurance",pharmacy_action,First candidate for secondary confirmation channel
+Financial transfer,payments_api,finance,9,2,4,9,9,6,neural_signature,"account balances, recipient history, anomaly signals",transfer_summary,Maximum friction — long window plus trained neural signature
+Post to social media,social_api,communication,7,2,3,8,7,6,focus_bar_extended,"follower context, tone history, recency of topic",post_draft,High friction despite low financial stakes — reputational irreversibility
+Navigate to location,maps_api,mobility,2,9,6,2,4,2,auto,"current location, destination history, calendar",route_command,Low stakes — wrong route is cheap to correct
+Call someone,telephony_api,communication,5,7,5,5,6,4,focus_bar,"relationship history, time of day, recent contact",call_initiation,Interesting — commitment fires a live synchronous action unlike async messaging
+Book a meeting,calendar_api,productivity,5,6,4,5,7,5,focus_bar,"calendar, contacts, timezone, recent threads",calendar_invite,Consequence is social — involves another person's time
+Purchase a new item,ecommerce_api,commerce,6,5,2,7,7,4,focus_bar_extended,"purchase history, budget signals, item context",order_summary,Unlike reorder — low routineness raises threshold despite similar consequence
+Control a wheelchair,mobility_api,accessibility,8,7,9,8,9,3,focus_bar_extended,"physical environment, proximity sensors, intent",movement_command,High consequence on body — but high routineness and fast feedback loop
+Share location,messaging_api,communication,4,7,6,4,5,2,focus_bar,"contact, current location, relationship context",location_share,Privacy stakes make this higher friction than its consequence alone suggests
+Report a symptom,health_api,health,6,6,3,6,8,6,focus_bar_extended,"health history, recent events, medication log",symptom_log,System needs deep health context to compose meaningfully
+Delete a file,filesystem_api,productivity,5,3,5,6,4,2,focus_bar_extended,"file recency, access patterns, content type",delete_confirmation,Irreversibility drives friction more than consequence here
+Dismiss a notification,os_api,productivity,1,9,9,1,2,1,auto,"notification type, sender, urgency",dismiss_command,Near-frictionless — archetypal low-stakes action
+Authorize emergency contact,contacts_api,safety,8,4,2,8,8,5,neural_signature,"contact list, relationship context, situation",contact_action,Rare + high stakes + semi-irreversible = maximum commitment design

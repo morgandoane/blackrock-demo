@@ -1,0 +1,8 @@
+Place your watch hardware PNG/WebP here as:
+
+  watch-overlay.png
+
+The screen area in the image should be transparent so the UI shows through.
+
+Tweak alignment in src/App.tsx → WATCH_OVERLAY
+(widthPercent, heightPercent, offsetXPx, offsetYPx, or set enabled: false to use the old vector bezel).

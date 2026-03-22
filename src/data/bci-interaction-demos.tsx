@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import MessagingPage from "../pages/MessagingPage";
 import PrescriptionPage from "../pages/PrescriptionPage";
+import TransferPage from "../pages/TransferPage";
 
 /**
  * Optional embedded demos keyed by interaction `id` (see `bci-interactions.json`).
@@ -9,4 +10,5 @@ import PrescriptionPage from "../pages/PrescriptionPage";
 export const INTERACTION_DEMO_BY_ID: Partial<Record<string, ReactNode>> = {
   "send-a-text-message": <MessagingPage embedded />,
   "refill-a-prescription": <PrescriptionPage embedded />,
+  "financial-transfer": <TransferPage embedded />,
 };

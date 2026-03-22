@@ -4,6 +4,7 @@ import InteractionsLayout from "./pages/InteractionsLayout";
 import InteractionsPage from "./pages/InteractionsPage";
 import MessagingPage from "./pages/MessagingPage";
 import PrescriptionPage from "./pages/PrescriptionPage";
+import TransferPage from "./pages/TransferPage";
 
 export default function App() {
   return (
@@ -25,6 +26,14 @@ export default function App() {
               element={
                 <div className="h-full min-h-0 overflow-hidden">
                   <PrescriptionPage />
+                </div>
+              }
+            />
+            <Route
+              path="/transfer"
+              element={
+                <div className="h-full min-h-0 overflow-hidden">
+                  <TransferPage />
                 </div>
               }
             />

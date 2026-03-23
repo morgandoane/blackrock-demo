@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   motion,
   AnimatePresence,
@@ -11,11 +11,15 @@ import WatchOverlayLayer from "../components/WatchOverlayLayer";
 import ClockFace from "../components/ClockFace";
 import PhaseLabels, { type DisplayPhase } from "../components/PhaseLabels";
 import ScenarioSelector from "../components/ScenarioSelector";
+import PlaybackControls from "../components/PlaybackControls";
+import usePlaybackController from "../hooks/usePlaybackController";
 
 // ─── Scenario config ───────────────────────────────────────────────────────────
 type ScenarioId = "simple" | "adjust" | "abandon";
 
 const LOOP_GAP_MS = 2500;
+/** Auto-play: time for the focus bar to fill 0→1 (send confirmation). */
+const COMMITMENT_FILL_DURATION_SEC = 3.5;
 
 const SCENARIO_OPTIONS: { id: ScenarioId; label: string }[] = [
   { id: "simple", label: "Send" },
@@ -33,6 +37,65 @@ const SCREEN_CONTENT_SCALE = 0.82;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type Phase = "ambient" | "context" | "composition" | "commitment" | "sent";
+
+// ─── Manual-mode step snapshots ─────────────────────────────────────────────
+interface MsgSnapshot {
+  phase: Phase;
+  showToken1: boolean;
+  showToken2: boolean;
+  showCorrection: boolean;
+  showCommitBar: boolean;
+  isRetracting: boolean;
+  isSent: boolean;
+  commitTarget: number;
+}
+
+function snap(overrides: Partial<MsgSnapshot>): MsgSnapshot {
+  return {
+    phase: "ambient",
+    showToken1: false,
+    showToken2: false,
+    showCorrection: false,
+    showCommitBar: false,
+    isRetracting: false,
+    isSent: false,
+    commitTarget: 0,
+    ...overrides,
+  };
+}
+
+const MSG_STEPS: Record<ScenarioId, MsgSnapshot[]> = {
+  simple: [
+    snap({}),
+    snap({ phase: "context" }),
+    snap({ phase: "composition", showToken1: true }),
+    snap({ phase: "composition", showToken1: true, showToken2: true }),
+    snap({ phase: "composition", showToken1: true, showToken2: true, showCorrection: true }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCorrection: true, showCommitBar: true, commitTarget: 1 }),
+    snap({ phase: "sent", showToken1: true, showToken2: true, showCorrection: true, showCommitBar: true, isSent: true, commitTarget: 1 }),
+  ],
+  adjust: [
+    snap({}),
+    snap({ phase: "context" }),
+    snap({ phase: "composition", showToken1: true }),
+    snap({ phase: "composition", showToken1: true, showToken2: true }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCommitBar: true, commitTarget: 0.4 }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCommitBar: true, isRetracting: true, commitTarget: 0 }),
+    snap({ phase: "composition", showToken1: true, showToken2: true, showCorrection: true }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCorrection: true, showCommitBar: true, commitTarget: 1 }),
+    snap({ phase: "sent", showToken1: true, showToken2: true, showCorrection: true, showCommitBar: true, isSent: true, commitTarget: 1 }),
+  ],
+  abandon: [
+    snap({}),
+    snap({ phase: "context" }),
+    snap({ phase: "composition", showToken1: true }),
+    snap({ phase: "composition", showToken1: true, showToken2: true }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCommitBar: true, commitTarget: 0.58 }),
+    snap({ phase: "commitment", showToken1: true, showToken2: true, showCommitBar: true, isRetracting: true, commitTarget: 0 }),
+    snap({ phase: "composition", showToken1: true, showToken2: true }),
+    snap({}),
+  ],
+};
 
 function toDisplayPhase(p: Phase): DisplayPhase {
   if (p === "sent") return "commitment";
@@ -82,7 +145,7 @@ function ContextScreen({ visible }: { visible: boolean }) {
           fontWeight: 600,
           color: "#fff",
           letterSpacing: -0.5,
-          marginBottom: 6,
+          marginBottom: 14,
         }}
       >
         Sarah
@@ -95,24 +158,15 @@ function ContextScreen({ visible }: { visible: boolean }) {
           fontSize: 11,
           color: "#444",
           letterSpacing: 0.2,
-          lineHeight: 1.8,
+          lineHeight: 1.45,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
         }}
       >
-        You: leaving in 10
-        <br />
-        18 min ago
+        <span>You: leaving in 10</span>
+        <span>18 min ago</span>
       </motion.div>
-      <motion.div
-        initial={{ scaleX: 0, opacity: 0 }}
-        animate={{ scaleX: visible ? 1 : 0, opacity: visible ? 1 : 0 }}
-        transition={{ delay: 0.7, duration: 1.0, ease: "easeOut" }}
-        style={{
-          height: 1,
-          background: "rgba(255,255,255,0.05)",
-          marginTop: 14,
-          transformOrigin: "left",
-        }}
-      />
     </motion.div>
   );
 }
@@ -397,6 +451,49 @@ export default function MessagingPage({ embedded = false }: { embedded?: boolean
   const [isSent, setIsSent] = useState(false);
   const commitmentProgress = useMotionValue(0);
 
+  // ── Manual-mode playback ──────────────────────────────────────────────────
+  const activeScenarioRef = useRef(activeScenario);
+  useEffect(() => { activeScenarioRef.current = activeScenario; });
+  const manualAnimControls = useRef<{ stop: () => void }[]>([]);
+
+  const applySnapshot = useCallback(
+    (index: number, direction: 1 | -1 | 0) => {
+      manualAnimControls.current.forEach((c) => c.stop());
+      manualAnimControls.current = [];
+
+      const s = MSG_STEPS[activeScenarioRef.current]?.[index];
+      if (!s) return;
+
+      setPhase(s.phase);
+      setShowToken1(s.showToken1);
+      setShowToken2(s.showToken2);
+      setShowCorrection(s.showCorrection);
+      setShowCommitBar(s.showCommitBar);
+      setIsRetracting(s.isRetracting);
+      setIsSent(s.isSent);
+
+      if (direction === 1 && s.commitTarget !== commitmentProgress.get()) {
+        const c = animate(commitmentProgress, s.commitTarget, {
+          duration:
+            s.commitTarget >= 1 ? COMMITMENT_FILL_DURATION_SEC : 1,
+          ease: [0.4, 0, 0.6, 1],
+        });
+        manualAnimControls.current.push(c);
+      } else {
+        commitmentProgress.set(s.commitTarget);
+      }
+    },
+    [commitmentProgress],
+  );
+
+  const steps = MSG_STEPS[activeScenario];
+  const playback = usePlaybackController({
+    totalSteps: steps.length,
+    resetKey: seqKey,
+    onStep: applySnapshot,
+    onAutoResume: () => setSeqKey((k) => k + 1),
+  });
+
   const token1Text =
     activeScenario === "abandon" ? "Running a bit" : "Almost there,";
   const token2Text =
@@ -447,7 +544,7 @@ export default function MessagingPage({ embedded = false }: { embedded?: boolean
           setShowCommitBar(true);
           setPhase("commitment");
           const c = animate(commitmentProgress, 1, {
-            duration: 2.6,
+            duration: COMMITMENT_FILL_DURATION_SEC,
             ease: [0.4, 0, 0.6, 1],
             onComplete: () => {
               safeLater(() => {
@@ -491,7 +588,7 @@ export default function MessagingPage({ embedded = false }: { embedded?: boolean
                   safeLater(() => {
                     setPhase("commitment");
                     const c3 = animate(commitmentProgress, 1, {
-                      duration: 2.6,
+                      duration: COMMITMENT_FILL_DURATION_SEC,
                       ease: [0.4, 0, 0.6, 1],
                       onComplete: () => {
                         safeLater(() => {
@@ -569,10 +666,11 @@ export default function MessagingPage({ embedded = false }: { embedded?: boolean
   };
 
   useEffect(() => {
+    if (playback.mode !== "auto") return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- drives timed scenario animation
     const cleanup = runSequence(activeScenario);
     return cleanup;
-  }, [seqKey, activeScenario, runSequence]);
+  }, [seqKey, activeScenario, runSequence, playback.mode]);
 
   const showAmbient = phase === "ambient";
   const showContext = phase === "context";
@@ -606,11 +704,19 @@ export default function MessagingPage({ embedded = false }: { embedded?: boolean
         }}
       >
         <PhaseLabels phase={toDisplayPhase(phase)} />
-        <div style={{ marginTop: 80, paddingLeft: 36 }}>
+        <div style={{ marginTop: 80, paddingLeft: 36, display: "flex", flexDirection: "column", gap: 24 }}>
           <ScenarioSelector
             options={SCENARIO_OPTIONS}
             active={selectedScenario}
             onChange={handleScenarioChange}
+          />
+          <PlaybackControls
+            mode={playback.mode}
+            stepIndex={playback.stepIndex}
+            totalSteps={playback.totalSteps}
+            onToggleMode={playback.toggleMode}
+            onForward={playback.goForward}
+            onBackward={playback.goBackward}
           />
         </div>
       </div>

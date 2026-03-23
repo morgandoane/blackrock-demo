@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   motion,
   AnimatePresence,
@@ -11,11 +11,19 @@ import WatchOverlayLayer from "../components/WatchOverlayLayer";
 import ClockFace from "../components/ClockFace";
 import PhaseLabels, { type DisplayPhase } from "../components/PhaseLabels";
 import ScenarioSelector from "../components/ScenarioSelector";
+import PlaybackControls from "../components/PlaybackControls";
+import usePlaybackController from "../hooks/usePlaybackController";
 
 // ─── Scenario config ───────────────────────────────────────────────────────────
 type ScenarioId = "change_pharmacy" | "quick_refill" | "cancel";
 
 const LOOP_GAP_MS = 2500;
+/** Main refill bar: 0→checkpoint (“hold to confirm” first stage). */
+const MAIN_COMMIT_STAGE1_SEC = 3.5;
+/** Main refill bar: checkpoint→full (second stage). */
+const MAIN_COMMIT_STAGE2_SEC = 2.4;
+/** Pharmacy picker bar: single 0→1 fill. */
+const PHARMACY_COMMIT_SEC = 2.3;
 
 const SCENARIO_OPTIONS: { id: ScenarioId; label: string }[] = [
   { id: "change_pharmacy", label: "Change Pharmacy" },
@@ -74,6 +82,79 @@ const PHARMACIES: PharmacyPin[] = [
 
 const SELECTED_PHARMACY = PHARMACIES[1]; // Walgreens Oak — closest
 
+// ─── Manual-mode step snapshots ─────────────────────────────────────────────
+interface RxSnapshot {
+  phase: Phase;
+  showMapPins: boolean;
+  selectedPharmacyId: string | null;
+  pharmacyConfirmed: boolean;
+  pharmacyName: string;
+  pharmacyHighlight: boolean;
+  showPharmacyBar: boolean;
+  pharmacyBarSent: boolean;
+  pharmacyTarget: number;
+  showMainBar: boolean;
+  mainBarSent: boolean;
+  isRetracting: boolean;
+  mainTarget: number;
+}
+
+function rxSnap(overrides: Partial<RxSnapshot>): RxSnapshot {
+  return {
+    phase: "ambient",
+    showMapPins: false,
+    selectedPharmacyId: null,
+    pharmacyConfirmed: false,
+    pharmacyName: "CVS Main St",
+    pharmacyHighlight: false,
+    showPharmacyBar: false,
+    pharmacyBarSent: false,
+    pharmacyTarget: 0,
+    showMainBar: false,
+    mainBarSent: false,
+    isRetracting: false,
+    mainTarget: 0,
+    ...overrides,
+  };
+}
+
+const RX_STEPS: Record<ScenarioId, RxSnapshot[]> = {
+  change_pharmacy: [
+    rxSnap({}),
+    rxSnap({ phase: "context" }),
+    rxSnap({ phase: "composition" }),
+    rxSnap({ phase: "composition", pharmacyHighlight: true }),
+    rxSnap({ phase: "pharmacy_context", showMapPins: true }),
+    rxSnap({ phase: "pharmacy_select", showMapPins: true, selectedPharmacyId: SELECTED_PHARMACY.id }),
+    rxSnap({ phase: "pharmacy_commit", showMapPins: true, selectedPharmacyId: SELECTED_PHARMACY.id, showPharmacyBar: true, pharmacyTarget: 1 }),
+    rxSnap({ phase: "composition_return", pharmacyConfirmed: true, pharmacyName: "Walgreens Oak", pharmacyHighlight: true }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, pharmacyName: "Walgreens Oak", showMainBar: true, mainTarget: 0.68 }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, pharmacyName: "Walgreens Oak", showMainBar: true, mainTarget: 1 }),
+    rxSnap({ phase: "confirmed", pharmacyConfirmed: true, pharmacyName: "Walgreens Oak", showMainBar: true, mainBarSent: true, mainTarget: 1 }),
+    rxSnap({}),
+  ],
+  quick_refill: [
+    rxSnap({}),
+    rxSnap({ phase: "context" }),
+    rxSnap({ phase: "composition" }),
+    rxSnap({ phase: "composition", pharmacyHighlight: true }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, showMainBar: true, mainTarget: 0.68 }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, showMainBar: true, mainTarget: 1 }),
+    rxSnap({ phase: "confirmed", pharmacyConfirmed: true, showMainBar: true, mainBarSent: true, mainTarget: 1 }),
+    rxSnap({}),
+  ],
+  cancel: [
+    rxSnap({}),
+    rxSnap({ phase: "context" }),
+    rxSnap({ phase: "composition" }),
+    rxSnap({ phase: "composition", pharmacyHighlight: true }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, showMainBar: true, mainTarget: 0.64 }),
+    rxSnap({ phase: "commitment", pharmacyConfirmed: true, showMainBar: true, isRetracting: true, mainTarget: 0 }),
+    rxSnap({ phase: "composition", pharmacyConfirmed: true }),
+    rxSnap({}),
+  ],
+};
+
 // ─── Context: Prescription Reminder ─────────────────────────────────────────────
 function ReminderScreen({ visible }: { visible: boolean }) {
   return (
@@ -129,18 +210,6 @@ function ReminderScreen({ visible }: { visible: boolean }) {
       >
         Last filled 28 days ago
       </motion.div>
-
-      <motion.div
-        initial={{ scaleX: 0, opacity: 0 }}
-        animate={{ scaleX: visible ? 1 : 0, opacity: visible ? 1 : 0 }}
-        transition={{ delay: 0.8, duration: 1.0, ease: "easeOut" }}
-        style={{
-          height: 1,
-          background: "rgba(255,255,255,0.06)",
-          marginTop: 10,
-          transformOrigin: "left",
-        }}
-      />
     </motion.div>
   );
 }
@@ -491,6 +560,74 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
   const [isRetracting, setIsRetracting] = useState(false);
   const mainProgress = useMotionValue(0);
 
+  // ── Manual-mode playback ──────────────────────────────────────────────────
+  const activeScenarioRef = useRef(activeScenario);
+  useEffect(() => { activeScenarioRef.current = activeScenario; });
+  const manualAnimControls = useRef<{ stop: () => void }[]>([]);
+
+  const applySnapshot = useCallback(
+    (index: number, direction: 1 | -1 | 0) => {
+      manualAnimControls.current.forEach((c) => c.stop());
+      manualAnimControls.current = [];
+
+      const s = RX_STEPS[activeScenarioRef.current]?.[index];
+      if (!s) return;
+
+      setPhase(s.phase);
+      setShowMapPins(s.showMapPins);
+      setSelectedPharmacyId(s.selectedPharmacyId);
+      setPharmacyConfirmed(s.pharmacyConfirmed);
+      setPharmacyName(s.pharmacyName);
+      setPharmacyHighlight(s.pharmacyHighlight);
+      setShowPharmacyBar(s.showPharmacyBar);
+      setPharmacyBarSent(s.pharmacyBarSent);
+      setShowMainBar(s.showMainBar);
+      setMainBarSent(s.mainBarSent);
+      setIsRetracting(s.isRetracting);
+
+      if (direction === 1 && s.pharmacyTarget !== pharmacyProgress.get()) {
+        const prevP = pharmacyProgress.get();
+        const c = animate(pharmacyProgress, s.pharmacyTarget, {
+          duration:
+            s.pharmacyTarget >= 1 && prevP < 0.5
+              ? PHARMACY_COMMIT_SEC
+              : 1,
+          ease: [0.4, 0, 0.6, 1],
+        });
+        manualAnimControls.current.push(c);
+      } else {
+        pharmacyProgress.set(s.pharmacyTarget);
+      }
+
+      if (direction === 1 && s.mainTarget !== mainProgress.get()) {
+        const prevMain = mainProgress.get();
+        const nextMain = s.mainTarget;
+        let mainDuration = 1;
+        if (nextMain === 1 && prevMain >= 0.5 && prevMain < 1) {
+          mainDuration = MAIN_COMMIT_STAGE2_SEC;
+        } else if (nextMain >= 0.6 && nextMain < 1 && prevMain < 0.5) {
+          mainDuration = MAIN_COMMIT_STAGE1_SEC * (nextMain / 0.68);
+        }
+        const c = animate(mainProgress, s.mainTarget, {
+          duration: mainDuration,
+          ease: [0.4, 0, 0.6, 1],
+        });
+        manualAnimControls.current.push(c);
+      } else {
+        mainProgress.set(s.mainTarget);
+      }
+    },
+    [pharmacyProgress, mainProgress],
+  );
+
+  const steps = RX_STEPS[activeScenario];
+  const playback = usePlaybackController({
+    totalSteps: steps.length,
+    resetKey: seqKey,
+    onStep: applySnapshot,
+    onAutoResume: () => setSeqKey((k) => k + 1),
+  });
+
   const refillFields: RefillField[] = [
     { label: "Medication", value: "Lisinopril 10mg", checked: true },
     { label: "Pharmacy", value: pharmacyName, checked: pharmacyConfirmed, highlight: pharmacyHighlight },
@@ -564,7 +701,7 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
           setPhase("pharmacy_commit");
           setShowPharmacyBar(true);
           const c = animate(pharmacyProgress, 1, {
-            duration: 1.8,
+            duration: PHARMACY_COMMIT_SEC,
             ease: [0.4, 0, 0.6, 1],
             onComplete: () => {
               safeLater(() => {
@@ -585,12 +722,12 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
                     setPhase("commitment");
                     setShowMainBar(true);
                     const c2 = animate(mainProgress, 0.68, {
-                      duration: 2.8,
+                      duration: MAIN_COMMIT_STAGE1_SEC,
                       ease: [0.4, 0, 0.6, 1],
                       onComplete: () => {
                         safeLater(() => {
                           const c3 = animate(mainProgress, 1, {
-                            duration: 1.8,
+                            duration: MAIN_COMMIT_STAGE2_SEC,
                             ease: [0.3, 0, 0.5, 1],
                             onComplete: () => {
                               safeLater(() => {
@@ -627,12 +764,12 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
           setPhase("commitment");
           setShowMainBar(true);
           const c1 = animate(mainProgress, 0.68, {
-            duration: 2.8,
+            duration: MAIN_COMMIT_STAGE1_SEC,
             ease: [0.4, 0, 0.6, 1],
             onComplete: () => {
               safeLater(() => {
                 const c2 = animate(mainProgress, 1, {
-                  duration: 1.8,
+                  duration: MAIN_COMMIT_STAGE2_SEC,
                   ease: [0.3, 0, 0.5, 1],
                   onComplete: () => {
                     safeLater(() => {
@@ -663,7 +800,7 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
           setPhase("commitment");
           setShowMainBar(true);
           const c1 = animate(mainProgress, 0.64, {
-            duration: 2.5,
+            duration: MAIN_COMMIT_STAGE1_SEC * (0.64 / 0.68),
             ease: [0.4, 0, 0.6, 1],
             onComplete: () => {
               if (aborted) return;
@@ -703,10 +840,11 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
   };
 
   useEffect(() => {
+    if (playback.mode !== "auto") return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- drives timed scenario animation
     const cleanup = runSequence(activeScenario);
     return cleanup;
-  }, [seqKey, activeScenario, runSequence]);
+  }, [seqKey, activeScenario, runSequence, playback.mode]);
 
   const WS = WATCH_SCALE;
   const embeddedSize = "clamp(720px, 95vh, 1400px)";
@@ -734,11 +872,19 @@ export default function PrescriptionPage({ embedded = false }: { embedded?: bool
         }}
       >
         <PhaseLabels phase={toDisplayPhase(phase)} />
-        <div style={{ marginTop: 80, paddingLeft: 36 }}>
+        <div style={{ marginTop: 80, paddingLeft: 36, display: "flex", flexDirection: "column", gap: 24 }}>
           <ScenarioSelector
             options={SCENARIO_OPTIONS}
             active={selectedScenario}
             onChange={handleScenarioChange}
+          />
+          <PlaybackControls
+            mode={playback.mode}
+            stepIndex={playback.stepIndex}
+            totalSteps={playback.totalSteps}
+            onToggleMode={playback.toggleMode}
+            onForward={playback.goForward}
+            onBackward={playback.goBackward}
           />
         </div>
       </div>

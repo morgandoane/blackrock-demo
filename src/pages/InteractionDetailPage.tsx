@@ -5,7 +5,7 @@ import type { BciInteractionRecord } from "../data/bci-interactions.types";
 function InteractionMetaMinimal({ row }: { row: BciInteractionRecord }) {
   const notes = row.notes.trim();
   return (
-    <div className="mt-8 border-t border-white/10 pt-6">
+    <div className="mt-8 pt-6">
       {notes ? (
         <p className="text-sm leading-relaxed text-white/65">{notes}</p>
       ) : null}
@@ -42,7 +42,7 @@ export default function InteractionDetailPage() {
       <div className="min-h-full bg-[#0C4C2B] px-4 pb-16 pt-6 text-white">
         <div className="mx-auto max-w-2xl">
           <Link
-            to="/interactions"
+            to="/"
             className="text-sm text-white/60 underline-offset-2 hover:text-white hover:underline"
           >
             ← Back to interactions
@@ -72,7 +72,7 @@ export default function InteractionDetailPage() {
       <div className="w-full max-w-none">
         <div className="px-4 sm:px-6 lg:px-8">
           <Link
-            to="/interactions"
+            to="/"
             className="text-sm text-white/60 underline-offset-2 hover:text-white hover:underline"
           >
             ← Back to interactions
@@ -98,7 +98,7 @@ export default function InteractionDetailPage() {
           </>
         ) : (
           <div className="mx-auto max-w-3xl px-4 sm:px-6">
-            <header className="mt-6 border-b border-white/10 pb-6">
+            <header className="mt-6 pb-6">
               <p className="text-xs font-medium uppercase tracking-wide text-white/45">Interaction</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight">{row.action}</h1>
               <p className="mt-2 font-mono text-sm text-white/50">{row.tool}</p>

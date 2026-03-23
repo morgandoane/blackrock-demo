@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   motion,
   AnimatePresence,
@@ -12,6 +12,8 @@ import WatchOverlayLayer from "../components/WatchOverlayLayer";
 import ClockFace from "../components/ClockFace";
 import PhaseLabels, { type DisplayPhase } from "../components/PhaseLabels";
 import ScenarioSelector from "../components/ScenarioSelector";
+import PlaybackControls from "../components/PlaybackControls";
+import usePlaybackController from "../hooks/usePlaybackController";
 
 // ─── Scenario config ───────────────────────────────────────────────────────────
 type ScenarioId = "complete" | "abort";
@@ -50,6 +52,56 @@ function toDisplayPhase(p: Phase): DisplayPhase {
       return "commitment";
   }
 }
+
+// ─── Manual-mode step snapshots ─────────────────────────────────────────────
+interface TxSnapshot {
+  phase: Phase;
+  fieldsChecked: number;
+  showCommitBar: boolean;
+  commitBarSent: boolean;
+  commitTarget: number;
+  neuralTarget: number;
+}
+
+function txSnap(overrides: Partial<TxSnapshot>): TxSnapshot {
+  return {
+    phase: "ambient",
+    fieldsChecked: 0,
+    showCommitBar: false,
+    commitBarSent: false,
+    commitTarget: 0,
+    neuralTarget: 0,
+    ...overrides,
+  };
+}
+
+const TX_STEPS: Record<ScenarioId, TxSnapshot[]> = {
+  complete: [
+    txSnap({}),
+    txSnap({ phase: "context" }),
+    txSnap({ phase: "composition" }),
+    txSnap({ phase: "composition", fieldsChecked: 1 }),
+    txSnap({ phase: "composition", fieldsChecked: 2 }),
+    txSnap({ phase: "composition", fieldsChecked: 3 }),
+    txSnap({ phase: "commitment", fieldsChecked: 3, showCommitBar: true, commitTarget: 1 }),
+    txSnap({ phase: "neural_signature", fieldsChecked: 3, neuralTarget: 1 }),
+    txSnap({ phase: "confirmed", fieldsChecked: 3, neuralTarget: 1 }),
+    txSnap({}),
+  ],
+  abort: [
+    txSnap({}),
+    txSnap({ phase: "context" }),
+    txSnap({ phase: "composition" }),
+    txSnap({ phase: "composition", fieldsChecked: 1 }),
+    txSnap({ phase: "composition", fieldsChecked: 2 }),
+    txSnap({ phase: "composition", fieldsChecked: 3 }),
+    txSnap({ phase: "commitment", fieldsChecked: 3, showCommitBar: true, commitTarget: 1 }),
+    txSnap({ phase: "neural_signature", fieldsChecked: 3, neuralTarget: 0.45 }),
+    txSnap({ phase: "neural_signature", fieldsChecked: 3, neuralTarget: 0 }),
+    txSnap({ phase: "composition", fieldsChecked: 3 }),
+    txSnap({}),
+  ],
+};
 
 // ─── Context: Transfer Notification ─────────────────────────────────────────────
 function TransferContextScreen({ visible }: { visible: boolean }) {
@@ -131,18 +183,6 @@ function TransferContextScreen({ visible }: { visible: boolean }) {
       >
         Last transfer 12 days ago
       </motion.div>
-
-      <motion.div
-        initial={{ scaleX: 0, opacity: 0 }}
-        animate={{ scaleX: visible ? 1 : 0, opacity: visible ? 1 : 0 }}
-        transition={{ delay: 0.8, duration: 1.0, ease: "easeOut" }}
-        style={{
-          height: 1,
-          background: "rgba(255,255,255,0.06)",
-          marginTop: 10,
-          transformOrigin: "left",
-        }}
-      />
     </motion.div>
   );
 }
@@ -345,6 +385,56 @@ export default function TransferPage({
 
   const neuralSaturation = useMotionValue(0);
 
+  // ── Manual-mode playback ──────────────────────────────────────────────────
+  const activeScenarioRef = useRef(activeScenario);
+  useEffect(() => { activeScenarioRef.current = activeScenario; });
+  const manualAnimControls = useRef<{ stop: () => void }[]>([]);
+
+  const applySnapshot = useCallback(
+    (index: number, direction: 1 | -1 | 0) => {
+      manualAnimControls.current.forEach((c) => c.stop());
+      manualAnimControls.current = [];
+
+      const s = TX_STEPS[activeScenarioRef.current]?.[index];
+      if (!s) return;
+
+      setPhase(s.phase);
+      setFieldsChecked(s.fieldsChecked);
+      setShowCommitBar(s.showCommitBar);
+      setCommitBarSent(s.commitBarSent);
+
+      if (direction === 1 && s.commitTarget !== commitProgress.get()) {
+        const c = animate(commitProgress, s.commitTarget, {
+          duration: 1,
+          ease: [0.4, 0, 0.6, 1],
+        });
+        manualAnimControls.current.push(c);
+      } else {
+        commitProgress.set(s.commitTarget);
+      }
+
+      if (direction === 1 && s.neuralTarget !== neuralSaturation.get()) {
+        const dur = s.neuralTarget > neuralSaturation.get() ? 3 : 1.2;
+        const c = animate(neuralSaturation, s.neuralTarget, {
+          duration: dur,
+          ease: [0.05, 0, 0.95, 1],
+        });
+        manualAnimControls.current.push(c);
+      } else {
+        neuralSaturation.set(s.neuralTarget);
+      }
+    },
+    [commitProgress, neuralSaturation],
+  );
+
+  const steps = TX_STEPS[activeScenario];
+  const playback = usePlaybackController({
+    totalSteps: steps.length,
+    resetKey: seqKey,
+    onStep: applySnapshot,
+    onAutoResume: () => setSeqKey((k) => k + 1),
+  });
+
   const transferFields: TransferField[] = [
     { label: "Amount", value: "$250.00", checked: fieldsChecked >= 1 },
     { label: "To", value: "Sarah Chen", checked: fieldsChecked >= 2 },
@@ -507,7 +597,7 @@ export default function TransferPage({
 
       return cleanup;
     },
-    [neuralSaturation],
+    [commitProgress, neuralSaturation],
   );
 
   const handleScenarioChange = (id: ScenarioId) => {
@@ -516,9 +606,11 @@ export default function TransferPage({
   };
 
   useEffect(() => {
+    if (playback.mode !== "auto") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drives timed scenario animation
     const cleanup = runSequence(activeScenario);
     return cleanup;
-  }, [seqKey, activeScenario, runSequence]);
+  }, [seqKey, activeScenario, runSequence, playback.mode]);
 
   const WS = WATCH_SCALE;
   const embeddedSize = "clamp(720px, 95vh, 1400px)";
@@ -546,11 +638,19 @@ export default function TransferPage({
         }}
       >
         <PhaseLabels phase={toDisplayPhase(phase)} />
-        <div style={{ marginTop: 80, paddingLeft: 36 }}>
+        <div style={{ marginTop: 80, paddingLeft: 36, display: "flex", flexDirection: "column", gap: 24 }}>
           <ScenarioSelector
             options={SCENARIO_OPTIONS}
             active={selectedScenario}
             onChange={handleScenarioChange}
+          />
+          <PlaybackControls
+            mode={playback.mode}
+            stepIndex={playback.stepIndex}
+            totalSteps={playback.totalSteps}
+            onToggleMode={playback.toggleMode}
+            onForward={playback.goForward}
+            onBackward={playback.goBackward}
           />
         </div>
       </div>

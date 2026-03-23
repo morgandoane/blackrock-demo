@@ -12,7 +12,13 @@ export default function App() {
       <div className="flex h-full min-h-0 flex-col">
         <main className="min-h-0 flex-1">
           <Routes>
-            <Route path="/" element={<Navigate to="/messaging" replace />} />
+            <Route path="/" element={<InteractionsLayout />}>
+              <Route index element={<InteractionsPage />} />
+              <Route
+                path=":interactionId"
+                element={<InteractionDetailPage />}
+              />
+            </Route>
             <Route
               path="/messaging"
               element={
@@ -37,13 +43,7 @@ export default function App() {
                 </div>
               }
             />
-            <Route path="/interactions" element={<InteractionsLayout />}>
-              <Route index element={<InteractionsPage />} />
-              <Route
-                path=":interactionId"
-                element={<InteractionDetailPage />}
-              />
-            </Route>
+            <Route path="/interactions" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>

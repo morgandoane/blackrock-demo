@@ -40,19 +40,6 @@ const PALETTE = [
 
 type ChartRow = BciInteractionRecord & { x: number; y: number; z: number };
 
-type ColorMode = "domain" | "commitment_mechanism";
-
-function useCategoryColors(rows: BciInteractionRecord[], mode: ColorMode) {
-  return useMemo(() => {
-    const keys = [...new Set(rows.map((r) => r[mode]))].sort();
-    const map: Record<string, string> = {};
-    keys.forEach((k, i) => {
-      map[k] = PALETTE[i % PALETTE.length]!;
-    });
-    return { keys, map };
-  }, [rows, mode]);
-}
-
 type BciTooltipProps = {
   active?: boolean;
   payload?: ReadonlyArray<{ payload?: ChartRow }>;
@@ -106,12 +93,19 @@ export default function InteractionsPage() {
   const [xKey, setXKey] = useState<BciNumericField>("consequence");
   const [yKey, setYKey] = useState<BciNumericField>("reversibility");
   const [sizeKey, setSizeKey] = useState<BciNumericField>("commitment_friction");
-  const [colorMode, setColorMode] = useState<ColorMode>("domain");
 
   const allDomains = useMemo(
     () => [...new Set(BCI_DATA.map((r) => r.domain))].sort(),
     []
   );
+
+  const domainColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    allDomains.forEach((d, i) => {
+      map[d] = PALETTE[i % PALETTE.length]!;
+    });
+    return map;
+  }, [allDomains]);
   const allMechanisms = useMemo(
     () => [...new Set(BCI_DATA.map((r) => r.commitment_mechanism))].sort(),
     []
@@ -131,8 +125,6 @@ export default function InteractionsPage() {
     [selectedDomains, selectedMechanisms]
   );
 
-  const { map: colorMap } = useCategoryColors(filtered, colorMode);
-
   const chartRows: ChartRow[] = useMemo(
     () =>
       filtered.map((r) => ({
@@ -151,7 +143,7 @@ export default function InteractionsPage() {
   const handleScatterClick = useCallback(
     (item: unknown) => {
       const payload = (item as { payload?: ChartRow }).payload;
-      if (payload?.id) navigate(`/interactions/${payload.id}`);
+      if (payload?.id) navigate(`/${payload.id}`);
     },
     [navigate]
   );
@@ -176,80 +168,23 @@ export default function InteractionsPage() {
   const chipExcluded = "border-white/10 bg-black/20 text-white/35 line-through";
 
   return (
-    <div className="min-h-full bg-[#0C4C2B] px-4 pb-16 pt-6 text-white">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-8">
+    <div className="flex min-h-full flex-col bg-[#0C4C2B] px-3 pb-6 pt-4 text-white sm:px-6 lg:px-10">
+      <div className="mx-auto flex w-full max-w-none flex-1 flex-col">
+        <header className="mb-5 shrink-0 lg:mb-6">
           <h1 className="text-2xl font-semibold tracking-tight text-white">Explore actions</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/70">
+          <p className="mt-2 max-w-4xl text-sm leading-relaxed text-white/70 lg:max-w-5xl">
             The BCI is in charge of intent—the watch is mainly where that intent meets you: a small
             interface and a library of apps and actions. Each dot is one action type; set the menus,
             then tap for detail.
           </p>
         </header>
 
-        <div className="mb-6 flex flex-wrap items-end gap-4 rounded-xl border border-white/10 bg-black/15 p-4">
-          <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
-            Horizontal axis
-            <select
-              className="rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              value={xKey}
-              onChange={(e) => setXKey(e.target.value as BciNumericField)}
-            >
-              {NUM_FIELDS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
-            Vertical axis
-            <select
-              className="rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              value={yKey}
-              onChange={(e) => setYKey(e.target.value as BciNumericField)}
-            >
-              {NUM_FIELDS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
-            Bubble size
-            <select
-              className="rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              value={sizeKey}
-              onChange={(e) => setSizeKey(e.target.value as BciNumericField)}
-            >
-              {NUM_FIELDS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
-            Point color
-            <select
-              className="rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-              value={colorMode}
-              onChange={(e) => setColorMode(e.target.value as ColorMode)}
-            >
-              <option value="domain">Domain</option>
-              <option value="commitment_mechanism">Commitment mechanism</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="grid gap-8 lg:grid-cols-[1fr_minmax(260px,320px)]">
-          <section className="rounded-xl border border-white/10 bg-black/20 p-4 shadow-inner">
-            <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[1fr_minmax(272px,400px)] lg:items-start lg:gap-8">
+          <section className="flex min-h-0 flex-col rounded-xl border border-white/10 bg-black/20 p-3 shadow-inner sm:p-4">
+            <div className="mb-2 shrink-0">
               <h2 className="text-sm font-medium text-white/90">Chart</h2>
-              <span className="text-xs text-white/45">Further right or up = higher on that measure</span>
             </div>
-            <div className="h-[480px] w-full min-w-0">
+            <div className="min-h-[280px] w-full min-w-0 h-[min(62vh,520px)] lg:min-h-[360px] lg:h-[calc(100dvh-17rem)] lg:max-h-[640px]">
               {chartRows.length === 0 ? (
                 <p className="flex h-full items-center justify-center text-sm text-white/50">
                   No rows match the current filters.
@@ -309,7 +244,7 @@ export default function InteractionsPage() {
                       {chartRows.map((row) => (
                         <Cell
                           key={row.id}
-                          fill={colorMap[row[colorMode]] ?? "#94a3b8"}
+                          fill={domainColorMap[row.domain] ?? "#94a3b8"}
                           stroke="rgba(0,0,0,0.35)"
                           strokeWidth={1}
                         />
@@ -320,29 +255,11 @@ export default function InteractionsPage() {
               )}
             </div>
             <p className="mt-2 text-center text-xs text-white/45">
-              Larger bubbles score higher on {sizeLabel.toLowerCase()}. Hover for a quick readout;
-              click to open the full page.
+              Larger bubbles score higher on {sizeLabel.toLowerCase()}.
             </p>
           </section>
 
           <aside className="flex flex-col gap-6">
-            <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/45">
-                Legend ({colorMode === "domain" ? "domain" : "commitment mechanism"})
-              </h3>
-              <ul className="flex flex-col gap-1.5">
-                {Object.entries(colorMap).map(([k, c]) => (
-                  <li key={k} className="flex items-center gap-2 text-sm text-white/85">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: c }}
-                    />
-                    <span className="break-all">{k}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/45">
                 Filter by domain
@@ -369,11 +286,16 @@ export default function InteractionsPage() {
                       type="button"
                       onClick={() => toggleDomain(d)}
                       className={[
-                        "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                         cls,
                       ].join(" ")}
                     >
-                      {d}
+                      <span>{d}</span>
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: domainColorMap[d] }}
+                        aria-hidden
+                      />
                     </button>
                   );
                 })}
@@ -417,14 +339,49 @@ export default function InteractionsPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-black/15 p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-white/45">
-                Detail pages
-              </h3>
-              <p className="mt-3 text-sm leading-relaxed text-white/55">
-                Click any bubble in the chart to navigate to a dedicated page for that interaction
-                (URL includes its stable id).
-              </p>
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
+                Horizontal axis
+                <select
+                  className="w-full rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                  value={xKey}
+                  onChange={(e) => setXKey(e.target.value as BciNumericField)}
+                >
+                  {NUM_FIELDS.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
+                Vertical axis
+                <select
+                  className="w-full rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                  value={yKey}
+                  onChange={(e) => setYKey(e.target.value as BciNumericField)}
+                >
+                  {NUM_FIELDS.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium text-white/60">
+                Bubble size
+                <select
+                  className="w-full rounded-md border border-white/15 bg-[#0a3220] px-2 py-1.5 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                  value={sizeKey}
+                  onChange={(e) => setSizeKey(e.target.value as BciNumericField)}
+                >
+                  {NUM_FIELDS.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </aside>
         </div>

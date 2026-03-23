@@ -38,7 +38,51 @@ const PALETTE = [
   "#93c5fd",
 ];
 
-type ChartRow = BciInteractionRecord & { x: number; y: number; z: number };
+/** x,y,z = axis values for tooltips; plotX/plotY = jittered positions when dots share the same scores */
+type ChartRow = BciInteractionRecord & {
+  x: number;
+  y: number;
+  z: number;
+  plotX: number;
+  plotY: number;
+};
+
+type ChartRowBase = BciInteractionRecord & { x: number; y: number; z: number };
+
+/** Spreads overlapping dots in a small ring (same x,y for chosen axes). Radius is on the 1–10 score scale. */
+const OVERLAP_JITTER_RADIUS = 0.32;
+
+function withOverlapJitter(rows: ChartRowBase[]): ChartRow[] {
+  const groups = new Map<string, ChartRowBase[]>();
+  for (const row of rows) {
+    const key = `${row.x},${row.y}`;
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const jittered = rows.map((row) => {
+    const group = groups.get(`${row.x},${row.y}`)!;
+    if (group.length <= 1) {
+      return { ...row, plotX: row.x, plotY: row.y };
+    }
+    const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id));
+    const idx = sorted.findIndex((r) => r.id === row.id);
+    const n = group.length;
+    const angle = (2 * Math.PI * idx) / n;
+    const r = OVERLAP_JITTER_RADIUS;
+    return {
+      ...row,
+      plotX: row.x + r * Math.cos(angle),
+      plotY: row.y + r * Math.sin(angle),
+    };
+  });
+
+  // Prototypes on top so white rings stay visible if bubbles still touch
+  jittered.sort((a, b) => (a.demo != null ? 1 : 0) - (b.demo != null ? 1 : 0));
+
+  return jittered;
+}
 
 type BciTooltipProps = {
   active?: boolean;
@@ -125,16 +169,15 @@ export default function InteractionsPage() {
     [selectedDomains, selectedMechanisms]
   );
 
-  const chartRows: ChartRow[] = useMemo(
-    () =>
-      filtered.map((r) => ({
-        ...r,
-        x: r[xKey],
-        y: r[yKey],
-        z: r[sizeKey],
-      })),
-    [filtered, xKey, yKey, sizeKey]
-  );
+  const chartRows: ChartRow[] = useMemo(() => {
+    const base = filtered.map((r) => ({
+      ...r,
+      x: r[xKey],
+      y: r[yKey],
+      z: r[sizeKey],
+    }));
+    return withOverlapJitter(base);
+  }, [filtered, xKey, yKey, sizeKey]);
 
   const xLabel = NUM_FIELDS.find((f) => f.key === xKey)?.label ?? xKey;
   const yLabel = NUM_FIELDS.find((f) => f.key === yKey)?.label ?? yKey;
@@ -198,7 +241,7 @@ export default function InteractionsPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                     <XAxis
                       type="number"
-                      dataKey="x"
+                      dataKey="plotX"
                       name={xLabel}
                       domain={[0.5, 10.5]}
                       ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
@@ -214,7 +257,7 @@ export default function InteractionsPage() {
                     />
                     <YAxis
                       type="number"
-                      dataKey="y"
+                      dataKey="plotY"
                       name={yLabel}
                       domain={[0.5, 10.5]}
                       ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
@@ -241,21 +284,25 @@ export default function InteractionsPage() {
                       fill="#8884d8"
                       onClick={handleScatterClick}
                     >
-                      {chartRows.map((row) => (
-                        <Cell
-                          key={row.id}
-                          fill={domainColorMap[row.domain] ?? "#94a3b8"}
-                          stroke="rgba(0,0,0,0.35)"
-                          strokeWidth={1}
-                        />
-                      ))}
+                      {chartRows.map((row) => {
+                        const hasPrototype = row.demo != null;
+                        return (
+                          <Cell
+                            key={row.id}
+                            fill={domainColorMap[row.domain] ?? "#94a3b8"}
+                            stroke={hasPrototype ? "#ffffff" : "rgba(0,0,0,0.35)"}
+                            strokeWidth={hasPrototype ? 2.5 : 1}
+                          />
+                        );
+                      })}
                     </Scatter>
                   </ScatterChart>
                 </ResponsiveContainer>
               )}
             </div>
             <p className="mt-2 text-center text-xs text-white/45">
-              Larger bubbles score higher on {sizeLabel.toLowerCase()}.
+              Larger bubbles score higher on {sizeLabel.toLowerCase()}. White ring = in-app prototype
+              available.
             </p>
           </section>
 
